@@ -1,46 +1,167 @@
 "use client";
 
+import { useAuth, useUser } from "@clerk/nextjs";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Plus, Edit3, Trash2 } from "lucide-react";
 import Link from "next/link";
 import React, { useState } from "react";
-
-const playlists = [
-  {
-    id: "pl001",
-    name: "Frontend Development",
-    totalVideos: 12,
-    createdAt: "2025-04-25",
-  },
-  {
-    id: "pl002",
-    name: "Backend Tips",
-    totalVideos: 8,
-    createdAt: "2025-04-21",
-  },
-];
+import { format } from "timeago.js";
 
 const Page = () => {
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setEditShowModal] = useState(false);
   const [showDeleteModal, setDeleteShowModal] = useState(false);
-  const [playlist, setPlaylist] = useState<any>({});
   const [playlistName, setPlaylistName] = useState("");
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
   const [description, setDescription] = useState("");
+  const [selectedPlaylist, setSelectedPlaylist] = useState<any>(null);
+  const { getToken, isSignedIn } = useAuth();
+  const { isLoaded } = useUser();
+  const queryClient = useQueryClient();
+
+  const { data: playlists, isLoading } = useQuery({
+    queryKey: ["playlists"],
+    queryFn: async () => {
+      const token = await getToken();
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_SERVER_URI}/playlists`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      return response.json();
+    },
+    enabled: isLoaded && isSignedIn,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data: { name: string; description?: string }) => {
+      const token = await getToken();
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_SERVER_URI}/playlists`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(data),
+        },
+      );
+
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["playlists"] });
+      setPlaylistName("");
+      setDescription("");
+      setShowModal(false);
+    },
+    onError: (error) => {
+      throw new Error(error.message || "Failed to create playlist");
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async (data: {
+      id: string;
+      name: string;
+      description?: string;
+    }) => {
+      const token = await getToken();
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_SERVER_URI}/playlists/${data.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: data.name,
+            description: data.description,
+          }),
+        },
+      );
+
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["playlists"] });
+      setEditShowModal(false);
+      setSelectedPlaylist(null);
+    },
+    onError: (error) => {
+      throw new Error(error.message || "Failed to update playlist");
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const token = await getToken();
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_SERVER_URI}/playlists/${id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["playlists"] });
+      setDeleteShowModal(false);
+      setSelectedPlaylist(null);
+    },
+    onError: (error) => {
+      throw new Error(error.message || "Failed to delete playlist");
+    },
+  });
 
   const handleCreate = () => {
-    console.log("Playlist Created:", { playlistName, description });
-    setPlaylistName("");
-    setDescription("");
-    setShowModal(false);
+    if (!playlistName.trim()) return;
+
+    createMutation.mutate({ name: playlistName, description });
   };
 
   const handleSaveEdit = () => {
-    console.log("Playlist Edited:", { playlistName, description });
+    if (!editName.trim() || !selectedPlaylist) return;
+
+    updateMutation.mutate({
+      id: selectedPlaylist.id,
+      name: editName,
+      description: editDescription,
+    });
   };
 
   const handleConfirmDelete = () => {
-    console.log("Playlist Deleted:", { playlistName, description });
+    if (!selectedPlaylist) return;
+
+    deleteMutation.mutate(selectedPlaylist.id);
   };
+
+  const openEditModal = (pl: any) => {
+    setSelectedPlaylist(pl);
+    setEditName(pl.name);
+    setEditDescription(pl.description ?? "");
+    setEditShowModal(true);
+  };
+
+  const openDeleteModal = (pl: any) => {
+    setSelectedPlaylist(pl);
+    setDeleteShowModal(true);
+  };
+
+  if (!isLoaded) {
+    return null;
+  }
 
   return (
     <div className="text-black dark:text-white">
@@ -84,43 +205,48 @@ const Page = () => {
           </thead>
 
           <tbody>
-            {playlists.map((pl) => (
-              <tr
-                key={pl.id}
-                className="border-b dark:border-[#1f1f1f] hover:bg-gray-50 dark:hover:bg-[#1a1b1f]/50 transition"
-              >
-                <td className="px-4 py-4 font-medium">{pl.name}</td>
-                <td className="px-4 py-4 text-gray-600 dark:text-gray-400">
-                  {pl.totalVideos}
-                </td>
-                <td className="px-4 py-4 text-gray-600 dark:text-gray-400">
-                  {pl.createdAt}
-                </td>
-                <td className="px-4 py-4 flex gap-3">
-                  <button
-                    className="text-gray-400 hover:text-indigo-500 transition"
-                    title="Edit"
-                    onClick={() => {
-                      setPlaylist(pl);
-                      setEditShowModal(true);
-                    }}
-                  >
-                    <Edit3 size={16} />
-                  </button>
-                  <button
-                    className="text-red-500 hover:text-red-600 transition"
-                    title="Delete"
-                    onClick={() => setDeleteShowModal(true)}
-                  >
-                    <Trash2 size={16} />
-                  </button>
+            {isLoading ? (
+              <tr>
+                <td colSpan={4} className="text-center py-12 text-gray-400">
+                  Loading...
                 </td>
               </tr>
-            ))}
+            ) : (
+              playlists?.map((pl: any) => (
+                <tr
+                  key={pl.id}
+                  className="border-b dark:border-[#1f1f1f] hover:bg-gray-50 dark:hover:bg-[#1a1b1f]/50 transition"
+                >
+                  <td className="px-4 py-4 font-medium">{pl.name}</td>
+                  <td className="px-4 py-4 text-gray-600 dark:text-gray-400">
+                    {pl.total_videos}
+                  </td>
+                  <td className="px-4 py-4 capitalize text-gray-600 dark:text-gray-400">
+                    {format(pl.created_at)}
+                  </td>
+                  <td className="px-4 py-4 flex gap-3">
+                    <button
+                      className="text-gray-400 hover:text-indigo-500 transition"
+                      title="Edit"
+                      onClick={() => openEditModal(pl)}
+                    >
+                      <Edit3 size={16} />
+                    </button>
+                    <button
+                      className="text-red-500 hover:text-red-600 transition"
+                      title="Delete"
+                      onClick={() => openDeleteModal(pl)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
 
-        {playlists.length === 0 && (
+        {!isLoading && playlists?.length === 0 && (
           <div className="text-center py-12 text-gray-500 dark:text-gray-400">
             No playlists found.
           </div>
@@ -168,21 +294,31 @@ const Page = () => {
                   rows={3}
                 />
               </div>
+
+              {createMutation.isError && (
+                <p className="text-red-500 text-xs">
+                  {(createMutation.error as Error).message}
+                </p>
+              )}
             </div>
 
             {/* Footer */}
             <div className="flex justify-end items-center gap-3 px-6 pb-5">
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => {
+                  setShowModal(false);
+                  createMutation.reset();
+                }}
                 className="px-4 cursor-pointer py-1.5 text-sm rounded-md border dark:border-slate-600 dark:text-gray-300 text-black dark:hover:bg-slate-700 hover:bg-gray-200 transition"
               >
                 Cancel
               </button>
               <button
                 onClick={handleCreate}
+                disabled={createMutation.isPending}
                 className="px-4 cursor-pointer py-1.5 text-sm rounded-md bg-blue-600 hover:bg-blue-700 text-white font-semibold transition"
               >
-                Create Playlist
+                {createMutation.isPending ? "Creating..." : "Create Playlist"}
               </button>
             </div>
           </div>
@@ -204,47 +340,57 @@ const Page = () => {
             </div>
 
             {/* Body */}
-            {playlist && (
-              <div className="px-6 py-4 space-y-4">
-                <div>
-                  <label className="text-sm font-medium text-black dark:text-white">
-                    Playlist Name *
-                  </label>
-                  <input
-                    type="text"
-                    defaultValue={playlist?.name}
-                    className="mt-1 w-full px-3 py-2 rounded-md dark:bg-slate-900 border dark:border-slate-800 text-sm text-black dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-black dark:text-white">
-                    Description{" "}
-                    <span className="text-black/60 dark:text-gray-400">
-                      (optional)
-                    </span>
-                  </label>
-                  <textarea
-                    defaultValue={playlist.description}
-                    className="mt-1 w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-slate-900 border dark:border-slate-800 text-sm text-black dark:text-white"
-                    rows={3}
-                  />
-                </div>
+
+            <div className="px-6 py-4 space-y-4">
+              <div>
+                <label className="text-sm font-medium text-black dark:text-white">
+                  Playlist Name *
+                </label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-md dark:bg-slate-900 border dark:border-slate-800 text-sm text-black dark:text-white"
+                />
               </div>
-            )}
+              <div>
+                <label className="text-sm font-medium text-black dark:text-white">
+                  Description{" "}
+                  <span className="text-black/60 dark:text-gray-400">
+                    (optional)
+                  </span>
+                </label>
+                <textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-slate-900 border dark:border-slate-800 text-sm text-black dark:text-white"
+                  rows={3}
+                />
+              </div>
+              {updateMutation.isError && (
+                <p className="text-red-500 text-xs">
+                  {(updateMutation.error as Error).message}
+                </p>
+              )}
+            </div>
 
             {/* Footer */}
             <div className="flex justify-end items-center gap-3 px-6 pb-5">
               <button
-                onClick={() => setEditShowModal(!showEditModal)}
+                onClick={() => {
+                  setEditShowModal(!showEditModal);
+                  updateMutation.reset();
+                }}
                 className="cursor-pointer px-4 py-1.5 text-sm rounded-md border dark:border-slate-600 text-black dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-700 transition"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSaveEdit}
+                disabled={updateMutation.isPending}
                 className="cursor-pointer px-4 py-1.5 text-sm rounded-md bg-blue-600 hover:bg-blue-700 text-white font-semibold transition"
               >
-                Save Changes
+                {updateMutation.isPending ? "Saving..." : "Save Changes"}
               </button>
             </div>
           </div>
@@ -275,21 +421,30 @@ const Page = () => {
                   ends.
                 </p>
               </div>
+              {deleteMutation.isError && (
+                <p className="text-red-500 text-xs">
+                  {(deleteMutation.error as Error).message}
+                </p>
+              )}
             </div>
 
             {/* Footer */}
             <div className="flex justify-end items-center gap-3 px-6 pb-5">
               <button
-                onClick={() => setDeleteShowModal(false)}
+                onClick={() => {
+                  setDeleteShowModal(false);
+                  deleteMutation.reset();
+                }}
                 className="cursor-pointer px-4 py-1.5 text-sm rounded-md border dark:border-slate-600 dark:text-gray-300 dark:hover:bg-slate-700 transition hover:bg-gray-200"
               >
                 Cancel
               </button>
               <button
                 onClick={handleConfirmDelete}
+                disabled={deleteMutation.isPending}
                 className="cursor-pointer px-4 py-1.5 text-sm rounded-md bg-red-600 hover:bg-red-700 text-white font-semibold transition"
               >
-                Confirm Delete
+                {deleteMutation.isPending ? "Deleting..." : "Confirm Delete"}
               </button>
             </div>
           </div>
