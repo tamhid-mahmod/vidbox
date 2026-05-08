@@ -116,17 +116,24 @@ export class ApiKeyService {
         value: hash,
         prefix,
         id: newKeyId,
+        created_at: new Date(),
       })
       .where(and(eq(api_key.id, keyId), eq(api_key.user_id, userId)));
+
+    await this.redis.del(`vbx:api_key:${VERSION}:${keyId}`);
+    localCache.delete(`${VERSION}:${keyId}`);
 
     return { key: plaintextKey };
   }
 
   async getApiKeyLastUsed(keyId: string) {
-    const redisValue = await this.redis.hget(LAST_USED_HASH, keyId);
+    const normalizedKey = keyId.replace(/-/g, '');
+    const redisValue = await this.redis.hget(LAST_USED_HASH, normalizedKey);
 
     if (redisValue) {
-      return new Date(Number(redisValue));
+      return {
+        last_used_at: new Date(Number(redisValue)),
+      };
     }
 
     const record = await this.db.query.api_key.findFirst({
@@ -136,6 +143,8 @@ export class ApiKeyService {
       },
     });
 
-    return record?.last_used_at ?? null;
+    return {
+      last_used_at: record?.last_used_at ?? null,
+    };
   }
 }

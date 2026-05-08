@@ -12,6 +12,8 @@ import { ApiKeyUsageCron } from '@/scheduler/api-key-last-used.cron';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { ApiKeyController } from './api-key/api-key.controller';
+import { ApiKeyService } from './api-key/api-key.service';
 
 // ----------------------------------------------------------------------
 
@@ -24,7 +26,7 @@ import { AppService } from './app.service';
     RedisModule,
     ApiKeyModule,
   ],
-  controllers: [AppController],
-  providers: [AppService, ApiKeyUsageCron],
+  controllers: [AppController, ApiKeyController],
+  providers: [AppService, ApiKeyUsageCron, ApiKeyService],
 })
 export class AppModule {}

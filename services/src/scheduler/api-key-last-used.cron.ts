@@ -21,11 +21,22 @@ export class ApiKeyUsageCron {
 
   @Cron('*/5 * * * *')
   async flushLastUsed() {
-    const map = await this.redis.hgetall(LAST_USED_HASH);
+    const tempKey = `${LAST_USED_HASH}:flushing:${Date.now()}`;
 
-    if (!map || Object.keys(map).length === 0) return;
+    try {
+      await this.redis.rename(LAST_USED_HASH, tempKey);
+    } catch (err: any) {
+      if (err.message?.includes('no such key')) {
+        return;
+      }
+      throw err;
+    }
 
-    await this.redis.del(LAST_USED_HASH);
+    const map = await this.redis.hgetall(tempKey);
+    if (!map || Object.keys(map).length === 0) {
+      await this.redis.del(tempKey);
+      return;
+    }
 
     const entries = Object.entries(map)
       .map(([keyId, ts]) => ({
@@ -36,18 +47,23 @@ export class ApiKeyUsageCron {
         (x) => x.keyId && x.ts instanceof Date && !Number.isNaN(x.ts.getTime()),
       );
 
-    if (entries.length === 0) return;
+    if (entries.length === 0) {
+      await this.redis.del(tempKey);
+      return;
+    }
 
     const valuesSql = sql.join(
-      entries.map((e) => sql`${e.keyId}, ${e.ts}`),
+      entries.map((e) => sql`(${e.keyId}::uuid, ${e.ts}::timestamptz)`),
       sql`,`,
     );
 
     await this.db.execute(sql`
         UPDATE api_key AS ak
         SET last_used_at = v.ts
-        FROM (VALUES ${valuesSql} AS v(id,ts))
+        FROM (VALUES ${valuesSql}) AS v(id,ts)
         WHERE ak.id = v.id    
     `);
+
+    await this.redis.del(tempKey);
   }
 }

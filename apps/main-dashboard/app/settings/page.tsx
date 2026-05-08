@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import { format } from "timeago.js";
+import React, { useEffect, useState } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -16,7 +17,8 @@ import {
 import Link from "next/link";
 import SecuritySection from "@/components/security";
 import DeleteAccountModal from "@/components/modals/delete-account.modal";
-import { useUser } from "@clerk/nextjs";
+import { useAuth, useUser } from "@clerk/nextjs";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 const tabs = ["General", "Developer Access", "Security"];
 
@@ -27,9 +29,66 @@ export default function SettingsPage() {
   const [emailAlertsEnabled, setEmailAlertsEnabled] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [secretKey, setSecretKey] = useState("");
+  const [lastUsed, setLastUsed] = useState("");
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [copied, setCopied] = useState(false);
   const { user, isLoaded } = useUser();
+  const { getToken, isSignedIn } = useAuth();
+  const queryClient = useQueryClient();
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const { data: apiKeys, isLoading } = useQuery({
+    queryKey: ["api-keys"],
+    queryFn: async () => {
+      const token = await getToken();
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_SERVER_URI}/api-keys`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const res = await response.json();
+
+      return res;
+    },
+    enabled: isLoaded && isSignedIn,
+  });
+
+  const getLastUsed = async (keyId: string) => {
+    try {
+      const token = await getToken();
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_SERVER_URI}/api-keys/${keyId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const res = await response.json();
+      setLastUsed(res.last_used_at);
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  useEffect(() => {
+    if (apiKeys && apiKeys?.length !== 0) {
+      getLastUsed(apiKeys[0].id);
+    }
+  }, [apiKeys]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(secretKey);
@@ -38,12 +97,53 @@ export default function SettingsPage() {
   };
 
   const handleGenerateSecretKey = async () => {
-    setShowKeyModal(!showKeyModal);
+    const token = await getToken();
+    const response: any = await fetch(
+      `${process.env.NEXT_PUBLIC_SERVER_URI}/api-keys`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+
+    const res = await response.json();
+
+    setSecretKey(res.key);
+    setShowKeyModal(true);
+
+    queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+  };
+
+  const handleReGenerateSecretKey = async (keyId: string) => {
+    const token = await getToken();
+    const response: any = await fetch(
+      `${process.env.NEXT_PUBLIC_SERVER_URI}/api-keys/${keyId}/regenerate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+
+    const res = await response.json();
+
+    setSecretKey(res.key);
+    setShowKeyModal(true);
+
+    queryClient.invalidateQueries({ queryKey: ["api-keys"] });
   };
 
   const toggleDropdown = (key: string) => {
     setOpenDropdown((prev) => (prev === key ? null : key));
   };
+
+  const cooldownOver =
+    apiKeys && apiKeys[0]?.created_at
+      ? now - new Date(apiKeys[0].created_at).getTime() > 5 * 60 * 1000
+      : true;
 
   if (!isLoaded) {
     return null;
@@ -261,47 +361,61 @@ export default function SettingsPage() {
             </div>
             {/* Key List */}
 
-            {/* <div className="bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-md px-4 py-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs dark:text-slate-400">
-                    Key ID: dev_sk_1234...abcd
-                  </p>
-                  <p className="mt-1 font-mono dark:text-white tracking-wider">
-                    ********************
-                  </p>
-                  <p className="mt-1 text-sm dark:text-gray-200">
-                    Last used:{" "}
-                    <span className="dark:text-white">Not use yet!</span>
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <div className="flex gap-2">
-                    {cooldownOver ? (
-                      <button
-                        className="text-xs px-2 py-1 rounded-md border border-yellow-600 dark:text-yellow-400 dark:hover:bg-yellow-700/40"
-                        onClick={handleGenerateSecretKey}
-                      >
-                        Regenerate Key
-                      </button>
-                    ) : (
-                      <p className="text-xs text-gray-400 italic">
-                        Please wait 5 minutes before regenerating.
-                      </p>
-                    )}
+            {apiKeys?.length !== 0 && !isLoading ? (
+              <>
+                {apiKeys?.map((apiKey: any) => (
+                  <div
+                    key={apiKey?.id}
+                    className="bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-md px-4 py-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs dark:text-slate-400">
+                          Key ID: {apiKey?.prefix}
+                        </p>
+                        <p className="mt-1 font-mono dark:text-white tracking-wider">
+                          ********************
+                        </p>
+                        <p className="mt-1 text-sm dark:text-gray-200">
+                          Last used:{" "}
+                          <span className="dark:text-white">
+                            {lastUsed ? format(lastUsed) : "Not use yet!"}
+                          </span>
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <div className="flex gap-2">
+                          {cooldownOver ? (
+                            <button
+                              className="text-xs px-2 py-1 rounded-md border border-yellow-600 dark:text-yellow-400 dark:hover:bg-yellow-700/40"
+                              onClick={() =>
+                                handleReGenerateSecretKey(apiKey?.id)
+                              }
+                            >
+                              Regenerate Key
+                            </button>
+                          ) : (
+                            <p className="text-xs text-gray-400 italic">
+                              Please wait 5 minutes before regenerating.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            </div> */}
-            <>
-              <button
-                onClick={handleGenerateSecretKey}
-                className="flex items-center cursor-pointer gap-2 mt-3! text-xs px-3 py-2 rounded-md border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 transition-all"
-              >
-                <Plus size={16} />
-                Generate Secret Key
-              </button>
-            </>
+                ))}
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={handleGenerateSecretKey}
+                  className="flex items-center cursor-pointer gap-2 mt-3! text-xs px-3 py-2 rounded-md border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 transition-all"
+                >
+                  <Plus size={16} />
+                  Generate API Key
+                </button>
+              </>
+            )}
           </div>
         )}
 
