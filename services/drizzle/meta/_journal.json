@@ -8,6 +8,13 @@
       "when": 1777709639755,
       "tag": "0000_ordinary_captain_cross",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1778237628808,
+      "tag": "0001_abandoned_pride",
+      "breakpoints": true
     }
   ]
 }
