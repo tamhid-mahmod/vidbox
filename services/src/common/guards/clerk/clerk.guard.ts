@@ -88,7 +88,11 @@ export class ClerkAuthGuard implements CanActivate {
         const rKeyDigest = `vbx:api_key:${VERSION}:${keyId}`;
         const rDigest = await this.redis.hgetall(rKeyDigest);
 
-        if (rDigest?.invalid === '1' || rDigest?.apiKeyDigest !== d) {
+        if (rDigest?.invalid === '1') {
+          throw new UnauthorizedException('Unauthorized!');
+        }
+
+        if (rDigest?.apiKeyDigest && rDigest?.apiKeyDigest !== d) {
           throw new UnauthorizedException('Unauthorized!');
         }
 

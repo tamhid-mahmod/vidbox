@@ -2,14 +2,16 @@ services:
   redis:
     image: redis:7-alpine
     container_name: vidbox-redis
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-vidbox}
     ports:
       - '6379:6379'
     volumes:
       - redis_data:/data
-    command: redis-server --requirepass vidbox --appendonly yes --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass $${REDIS_PASSWORD:-vidbox} --appendonly yes --maxmemory-policy allkeys-lru
     restart: unless-stopped
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:-vidbox}', 'ping']
       interval: 1m30s
       timeout: 30s
       retries: 5
